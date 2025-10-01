@@ -16,5 +16,7 @@ for website in "${websites_list[@]}"; do
 		continue
 	fi
 	expiry_date=$(openssl x509 -noout -enddate <<< "${certificate}")
+	#strip the "notAfter=" prefix
+	expiry_date=${expiry_date#*=}
 	echo "[INFO] ${website} expires on: ${expiry_date}"
 done
