@@ -1,2 +1,4 @@
-google.com
-example.com
+test-ev-rsa.ssl.com
+test-dv-rsa.ssl.com
+test-ev-ecc.ssl.com
+test-dv-ecc.ssl.com
