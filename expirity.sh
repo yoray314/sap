@@ -50,6 +50,7 @@ get_expiry_date() {
 	expiry_date=${expiry_date#*=}
 }
 
+#remove comment on next line for debugging
 #set -x
 
 #NOTE: Consider making options for the script.
@@ -70,10 +71,20 @@ for website in "${websites_list[@]}"; do
 
 	get_expiry_date
 
-	echo "[INFO] ${website} is ${certificate_status} and expires on: ${expiry_date}"
+	#evaluate date in order to set better status messages
+	expiry_date_epoch=$(date -u -d "$expiry_date" +%s)
 
-	#TODO: Make output message based on thresholds
-	#TODO: Switch to functions
+	if [[ "$expiry_date_epoch" -lt "$(date -u +%s)" ]]; then
+		echo "[EXPIRED] ${website} is ${certificate_status} and has expired on: ${expiry_date}"
+	elif [[ "$expiry_date_epoch" -lt "$(date -u +%s -d '+30 days')" ]]; then
+		echo "[WARNING] ${website} is ${certificate_status} and is expiring in less than 30 days on ${expiry_date}"
+	else
+		status_message="INFO"
+		if [ "${certificate_status}" == "REVOKED" ]; then
+			status_message="REVOKED"
+		fi
+		echo "[${status_message}] ${website} is ${certificate_status} and expires on: ${expiry_date}"
+	fi
 
 	#NOTE: GNU Parallel would be a great fit, but I am not aware on what type of machine the script will run.
 	#NOTE: I think it's gonna be better if I use wait instead and have some concurrency by spawning a few processes.
