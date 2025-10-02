@@ -60,11 +60,11 @@ get_expiry_date() {
 mapfile -t websites_list < "$@"
 
 for website in "${websites_list[@]}"; do
-
+(
 	get_cert
 	if [ $? -ne 0 ]; then
 		echo "[FAILED] Could not connect to ${website} on port 443."
-		continue
+		exit 0
 	fi
 
 	check_cert_validity
@@ -85,7 +85,9 @@ for website in "${websites_list[@]}"; do
 		fi
 		echo "[${status_message}] ${website} is ${certificate_status} and expires on: ${expiry_date}"
 	fi
-
-	#NOTE: GNU Parallel would be a great fit, but I am not aware on what type of machine the script will run.
-	#NOTE: I think it's gonna be better if I use wait instead and have some concurrency by spawning a few processes.
+) &
+sleep 0.1 #throttle the checks a bit to avoid overwhelming the system
 done
+
+# Wait for all background checks to finish
+wait
