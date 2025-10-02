@@ -1,46 +1,37 @@
 #!/usr/bin/env bash
-set -x
 
-#NOTE: Consider making options for the script.
-
-#NOTE: An assumption is made that the input file contains one website per line, as no specification was provided.
-#make a list of websites from input file
-mapfile -t websites_list < "$@"
-
-for website in "${websites_list[@]}"; do
+get_cert() {
 	#input from /dev/null is to prevent openssl from waiting for input
 	#redirecting stderr to /dev/null is to suppress connection information
-	certificate=$(openssl s_client -showcerts -connect "${website}:443" < /dev/null)
-	if [ $? -ne 0 ]; then
-		echo "[FAILED] Could not connect to ${website} on port 443."
-		continue
-	fi
-	expiry_date=$(openssl x509 -noout -enddate <<< "${certificate}")
-	#strip the "notAfter=" prefix
-	expiry_date=${expiry_date#*=}
-	echo "[INFO] ${website} expires on: ${expiry_date}"
+	certificate=$(openssl s_client -showcerts -connect "${website}:443" < /dev/null 2>/dev/null)
 
+}
+
+check_cert_validity() {
 	#check if certificate is revoked
 	server_cert=$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{if(/BEGIN CERTIFICATE/){i++}; if(i==1){print}}' <<< "${certificate}")
 	issuer_cert=$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/{if(/BEGIN CERTIFICATE/){i++}; if(i==2){print}}' <<< "${certificate}")
 
 	if [ -z "$server_cert" ] || [ -z "$issuer_cert" ]; then
 		certificate_status="SKIPPED"
-		continue
+		return
 	fi
 
-	echo "$server_cert" > server.pem
-	echo "$issuer_cert" > issuer.pem
+	server_file=$(mktemp)
+	issuer_file=$(mktemp)
 
-	ocsp_uri=$(openssl x509 -noout -ocsp_uri -in server.pem)
+	echo "$server_cert" > "$server_file"
+	echo "$issuer_cert" > "$issuer_file"
+
+	ocsp_uri=$(openssl x509 -noout -ocsp_uri -in "$server_file")
 
 	if [ -z "$ocsp_uri" ]; then
 		certificate_status="SKIPPED"
-		rm server.pem issuer.pem
-		continue
+		rm "$server_file" "$issuer_file"
+		return
 	fi
 
-	ocsp_status=$(openssl ocsp -issuer issuer.pem -cert server.pem -url "$ocsp_uri" -text 2>/dev/null)
+	ocsp_status=$(openssl ocsp -issuer "$issuer_file" -cert "$server_file" -url "$ocsp_uri" -text 2>/dev/null)
 
 	if [[ "$ocsp_status" =~ "revoked" ]]; then
 		certificate_status="REVOKED"
@@ -50,11 +41,40 @@ for website in "${websites_list[@]}"; do
 		certificate_status="UNKNOWN"
 	fi
 
-	rm server.pem issuer.pem
-	#TODO: Set output message to include certificate status
+	rm "$server_file" "$issuer_file"
+}
+
+get_expiry_date() {
+	expiry_date=$(openssl x509 -noout -enddate <<< "${certificate}")
+	#strip the "notAfter=" prefix
+	expiry_date=${expiry_date#*=}
+}
+
+#set -x
+
+#NOTE: Consider making options for the script.
+
+#NOTE: An assumption is made that the input file contains one website per line, as no specification was provided.
+#make a list of websites from input file
+mapfile -t websites_list < "$@"
+
+for website in "${websites_list[@]}"; do
+
+	get_cert
+	if [ $? -ne 0 ]; then
+		echo "[FAILED] Could not connect to ${website} on port 443."
+		continue
+	fi
+
+	check_cert_validity
+
+	get_expiry_date
+
+	echo "[INFO] ${website} is ${certificate_status} and expires on: ${expiry_date}"
+
 	#TODO: Make output message based on thresholds
 	#TODO: Switch to functions
 
-	#NOTE: I have reduced the amount of pipelines for performance/readability but currently biggest bottleneck
-	# are the web requests, I should consider using GNU Parallel. Or switching to Python :D
+	#NOTE: GNU Parallel would be a great fit, but I am not aware on what type of machine the script will run.
+	#NOTE: I think it's gonna be better if I use wait instead and have some concurrency by spawning a few processes.
 done
